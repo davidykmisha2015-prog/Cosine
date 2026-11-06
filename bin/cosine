@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -e
+
+# Resolve directory of this script, handling symlinks
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+# Detect available Lua interpreter (LuaJIT, Lua 5.4, 5.3, 5.2, or default lua)
+LUA_BIN=""
+for candidate in luajit lua5.4 lua5.3 lua5.2 lua; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    LUA_BIN="$candidate"
+    break
+  fi
+done
+
+if [ -z "$LUA_BIN" ]; then
+  echo "Error: No Lua interpreter (lua or luajit) found in PATH." >&2
+  exit 1
+fi
+
+exec "$LUA_BIN" "$DIR/../src/main.lua" "$@"

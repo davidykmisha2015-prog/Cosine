@@ -1,0 +1,15 @@
+# Output reports
+results.json
+result.json
+
+# Temporary files
+*.tmp
+*.log
+*~
+*.swp
+*.swo
+
+# OS / Editor artifacts
+.DS_Store
+.vscode/
+.idea/
