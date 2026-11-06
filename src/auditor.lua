@@ -54,7 +54,7 @@ function auditor.get_lua_system_prompt()
         "2. REALISTIC THREAT MODEL (CLI vs SERVER CONTEXT):\n" ..
         "   - In CLI tools: The user running the tool already owns their own process, terminal, and user account.\n" ..
         "   - Self-exploitation is NOT a vulnerability: If an 'exploit' requires the user to modify their own $HOME, $USER, or system environment variables to attack themselves, it is NOT a vulnerability.\n" ..
-        "   - Accessing $HOME, standard system paths, or localized directories (e.g. 'Documents', 'Документи') is normal, expected behavior. DO NOT flag this.\n\n" ..
+        "   - Accessing $HOME, standard system paths, or localized directories (e.g. 'Documents', localized folders) is normal, expected behavior. DO NOT flag this.\n\n" ..
         "3. COMPLETE SOURCE-TO-SINK TRACEABILITY:\n" ..
         "   - Every reported issue MUST prove a complete, unbroken data-flow path: [Untrusted External Source] -> [Missing/Flawed Validation] -> [Dangerous Sink].\n" ..
         "   - You MUST inspect surrounding lines for validation. If the code checks for traversal patterns (e.g. 'find(\"/\")', 'find(\"%.%.\")', allowlists, pattern matching), respect it! If input is neutralized, DO NOT flag it.\n" ..

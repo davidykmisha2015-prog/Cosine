@@ -1,55 +1,58 @@
-# Правила та Філософія Аудиту Cosine (Zero False Positives)
+# Cosine SAST Auditing Rules & Philosophy (Zero False Positives)
 
-> **Головна мета:** Максимальна чесність, незалежне критичне мислення та нульова толерантність до хибних спрацьовувань (Zero False Positives). У продакшені та великому опенсорсі хибні спрацьовування дискредитують інструмент та витрачають час розробників.
-
----
-
-## 1. Чесність та Власна Думка (Intellectual Honesty & Skepticism)
-
-- **AI має мати власну експертну думку**: Інструмент не повинен вести себе як панікер чи сліпий чеклист-сканер, який шукає проблеми там, де їх немає, щоб "здаватися корисним".
-- **Чистий звіт `[]` — це найкращий результат**: Якщо код безпечний або містить належні перевірки, AI зобов'язаний видати чистий результат `[]`.
-- **Звичайний баг ≠ вразливість безпеки**: Невикористані змінні, дрібні помилки в рядках форматування (наприклад, зайвий аргумент у `string.format`), стилістичні неточності або кодові запахи (code smells) категорично заборонено видавати за вразливості безпеки.
+> **Primary Objective:** Rigorous intellectual honesty, independent critical thinking, and zero tolerance for false positives. In production and enterprise open-source environments, false positives erode developer trust, generate noise, and waste valuable engineering time.
 
 ---
 
-## 2. Реалістична Модель Загроз (CLI vs Сервер)
+## 1. Intellectual Honesty & Professional Skepticism
 
-- **Самоескплуатація (Self-Exploitation) — це НЕ вразливість**:
-  - У CLI-утилітах користувач запускає процес від свого імені у власному терміналі зі своїми правами доступу.
-  - Якщо "експлойт" вимагає, щоб користувач сам змінив свій `$HOME`, `$USER` чи інші змінні середовища, щоб "зламати" сам себе — це **не є вразливістю**.
-- **Стандартні системні шляхи**:
-  - Читання `$HOME`, перевірка директорій `Documents`, `Документи`, конфігів `~/.config` — це штатна поведінка будь-якої локальної утиліти, а не "Insecure File System Access".
-  - Вразливістю є лише випадок, коли **зовнішні неперевірені дані від зловмисника** потрапляють у чутливу операцію без санітизації.
+- **AI Must Exercise Its Own Judgment:** The SAST engine must never act like a panicked or superficial checklist scanner that invents problems just to "look thorough" or justify its execution.
+- **A Clean Report `[]` is the Best Result:** When the analyzed code is secure, respects sound architecture, or employs proper validation, the AI is expected and required to return `[]`.
+- **A Standard Bug ≠ A Security Vulnerability:** Unused variables, harmless syntax quirks, suboptimal idioms, minor string-formatting discrepancies (e.g., an extra unused argument in `string.format`), or general code smells must **never** be reported as security vulnerabilities.
 
 ---
 
-## 3. Суворе Трасування: Джерело → Санітизація → Приймач (Source-to-Sink)
+## 2. Realistic Threat Modeling (CLI Tools vs. Network Services)
 
-Для того, щоб AI мав право зареєструвати вразливість, він зобов'язаний повністю підтвердити ланцюжок:
-1. **Source (Джерело):** Неперевірене зовнішнє введення (аргументи CLI від неавторизованого джерела, небезпечний файл, мережевий сокет).
-2. **Sanitizer (Перевірка):** Повна відсутність або дефект захисту. Якщо в коді є перевірка на `..`, `/`, `\` (`find("/")`, `find("%.%.")`, вайтліст символів) — **AI зобов'язаний поважати цей захист і не піднімати тривогу!**
-3. **Sink (Приймач):** Чутлива функція (`os.execute`, `io.popen`, `loadstring`, запис/видалення системних файлів).
-
-*Якщо хоча б однієї ланки немає — вразливості не існує.*
-
----
-
-## 4. Заборона Галюцинацій та Додумування
-
-- **Перевірка реального синтаксису**:
-  - Якщо викликається `string.format('find "dir" -name "*.md"', arg)`, але в рядку **немає** специфікаторів формату на кшталт `%s` — змінна `arg` **НЕ інтерполюється** в рядок! AI заборонено стверджувати, що тут є ін'єкція.
-- **Стандартний `io.open` на читання**:
-  - Читання фіксованого або обмеженого локального файлу (`"r"`) не є Path Traversal. Path Traversal можливий лише тоді, коли зовнішнє введення дозволяє обійти межі дозволеної папки.
+- **Self-Exploitation is NOT a Vulnerability:**
+  - In CLI applications, the user executes the binary under their own local operating system account and privilege level.
+  - If an "exploit" requires the local user to maliciously modify their own environment variables (e.g., `$HOME`, `$USER`, `$PATH`) or edit their own configuration files to compromise themselves, **this is not a vulnerability**.
+- **Standard Operating System Paths:**
+  - Reading `$HOME`, checking common directories (e.g., `Documents`, localized folders), or loading user configs from `~/.config` is standard, benign behavior for local CLI tools—not "Insecure File System Access".
+  - A finding is only valid if **untrusted external data from an attacker** reaches a sensitive sink without appropriate validation.
 
 ---
 
-## 5. Градація Критичності (Severity Scale)
+## 3. Strict Source-to-Sink Dataflow Traceability
 
-| Рівень | Критерій | Приклад |
+To legitimately flag a vulnerability, the engine must verify an unbroken, end-to-end dataflow path:
+
+1. **Source:** Untrusted external input (unvalidated command-line parameters from an untrusted source, network socket, untrusted file).
+2. **Missing or Flawed Sanitization:** The total absence of validation or an inherently broken check. If the code verifies against directory traversal (e.g., checks for `/`, `..`, or uses a character allowlist), **the engine must respect this boundary and refrain from raising an alert!**
+3. **Sink:** A sensitive runtime primitive (`os.execute`, `subprocess(shell=True)`, `io.popen`, `loadstring`, arbitrary file writes or removals).
+
+*If any link in this chain is absent or broken, no vulnerability exists.*
+
+---
+
+## 4. Prohibition of Hallucinations and Speculative Claims
+
+- **Verify Exact Runtime Semantics:**
+  - If a function call like `string.format('find "dir" -name "*.md"', arg)` is made, but the format string contains **no** format specifiers (e.g., `%s`), the argument is **not** interpolated into the string. The engine must not hallucinate a command injection.
+- **Benign Read Operations:**
+  - Reading a static, relative, or bounded local file (`io.open(path, "r")` or `open(path, "r")`) is not path traversal. Path traversal requires external input capable of escaping the intended boundary directory.
+- **Parameterized Database Queries:**
+  - Prepared statements and parameterized SQL queries (`cursor.execute(sql, (param,))`) are immune to SQL injection and must never be reported.
+
+---
+
+## 5. Severity Scale & Classification
+
+| Level | Criteria | Example |
 |---|---|---|
-| **CRITICAL** | Пряме виконання довільного коду (RCE) через неперевірене зовнішнє введення | Несанітизована конкатенація аргументу в `os.execute` |
-| **HIGH** | Можливість запуску довільних команд або запису файлів у довільні системні директорії | Несанітизоване ім'я файлу в `io.popen` без валідації |
-| **MEDIUM** | Справжні логічні проломи в автентифікації або стані | Обхід перевірок прав доступу в багатокористувацькому контексті |
-| **LOW** | Справжні витоки конфіденційних даних | Реальні секретні токени (не дефолтні конфіги чи плейсхолдери) |
+| **CRITICAL** | Direct Arbitrary Code Execution (RCE) via untrusted external input | Unsanitized concatenation of external input into `os.execute` or `pickle.loads` |
+| **HIGH** | Arbitrary shell execution or arbitrary file write to system paths | Unvalidated filename in `io.popen` or unverified write to sensitive directories |
+| **MEDIUM** | Verified logical authorization or state bypasses | Authentication or permission bypass in multi-user contexts |
+| **LOW** | Genuine data leakage or hardcoded sensitive credentials | Real production API keys or tokens (not default configs or placeholders) |
 
-*Якщо потенційна проблема не становить реальної загрози в контексті застосунку — вона відкидається і не реєструється.*
+*If a theoretical edge case poses no practical risk in the application's actual operational context, it must be rejected.*
