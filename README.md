@@ -1,4 +1,4 @@
-![Logo Cosine](Cosine)
+![Logo Cosine](Cosine.png)
 # Cosine 🛡️
 
 > Static Application Security Testing (SAST) engine specialized for **Lua** (Lua 5.1–5.4 & LuaJIT) and **Python** (Python 3.x) codebases.
