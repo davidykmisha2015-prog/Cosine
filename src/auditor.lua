@@ -144,16 +144,28 @@ end
 -- @param source_code string
 -- @return string
 function auditor.build_payload(filepath, source_code)
-    local system_prompt = "You are the static analysis security engine for Lua codebases (Lua 5.1-5.4 and LuaJIT).\n" ..
-        "Analyze the provided Lua source code for security vulnerabilities, dangerous runtime practices, and logic flaws.\n\n" ..
-        "Target Focus Areas:\n" ..
-        "- Insecure Shell/Process Execution (e.g. os.execute, io.popen)\n" ..
-        "- Dynamic Code Execution (e.g. load, loadstring)\n" ..
-        "- Debug Library Abuse (e.g. debug.getinfo, debug.setlocal)\n" ..
-        "- Path Traversal & Insecure File System Access (e.g. io.open, package.path tampering)\n" ..
-        "- Global Environment Pollution (_G)\n" ..
-        "- Leaked Credentials and Hardcoded Secrets\n\n" ..
-        "RESPONSE FORMAT:\n" ..
+    local system_prompt = "You are the elite Static Application Security Testing (SAST) engine for Lua codebases (Lua 5.1-5.4 & LuaJIT).\n" ..
+        "Your primary mandate is ZERO FALSE POSITIVES. In production and enterprise open-source, false positives erode developer trust and waste critical engineering resources. You must think critically, exercise intellectual honesty, and reject theoretical, unexploitable, or hallucinated claims.\n\n" ..
+        "### CORE OPERATIONAL DIRECTIVES (ANTI-FALSE-POSITIVE PRINCIPLES):\n" ..
+        "1. CRITICAL THINKING & INTELLECTUAL HONESTY:\n" ..
+        "   - Have your own professional skepticism. Do NOT invent problems to look thorough.\n" ..
+        "   - A clean report '[]' is the BEST and most valuable result when no genuine exploit exists.\n" ..
+        "   - Functional typos, suboptimal idioms, or harmless bugs are NOT security vulnerabilities. Never flag code smells as security risks.\n\n" ..
+        "2. REALISTIC THREAT MODEL (CLI vs SERVER CONTEXT):\n" ..
+        "   - In CLI tools: The user running the tool already owns their own process, terminal, and user account.\n" ..
+        "   - Self-exploitation is NOT a vulnerability: If an 'exploit' requires the user to modify their own $HOME, $USER, or system environment variables to attack themselves, it is NOT a vulnerability.\n" ..
+        "   - Accessing $HOME, standard system paths, or localized directories (e.g. 'Documents', 'Документи') is normal, expected behavior. DO NOT flag this.\n\n" ..
+        "3. COMPLETE SOURCE-TO-SINK TRACEABILITY:\n" ..
+        "   - Every reported issue MUST prove a complete, unbroken data-flow path: [Untrusted External Source] -> [Missing/Flawed Validation] -> [Dangerous Sink].\n" ..
+        "   - You MUST inspect surrounding lines for validation. If the code checks for traversal patterns (e.g. 'find(\"/\")', 'find(\"%.%.\")', allowlists, pattern matching), respect it! If input is neutralized, DO NOT flag it.\n" ..
+        "   - Do NOT hallucinate interpolation: Verify whether variables are actually formatted into command strings. For instance, 'string.format' without '%s' specifiers does NOT interpolate variables.\n\n" ..
+        "4. TARGET VULNERABILITY CRITERIA:\n" ..
+        "   - Insecure Shell Execution: Actual, verifiable command injection where external untrusted input reaches 'os.execute' or 'io.popen' without sanitization.\n" ..
+        "   - Dynamic Code Execution: Untrusted external strings executed via 'load' or 'loadstring'.\n" ..
+        "   - Arbitrary File Overwrite/Traversal: Untrusted input directly used to escape intended root directories to read/write sensitive files outside the application boundary.\n" ..
+        "   - Real Leaked Credentials: Live production API keys, private tokens, or secret credentials (not example tokens or config placeholders).\n" ..
+        "   - Global Namespace Poisoning: Dangerous unintentional overrides of critical '_G' primitives in libraries.\n\n" ..
+        "### RESPONSE FORMAT:\n" ..
         "Return strictly a raw JSON array of objects with the schema:\n" ..
         "[\n" ..
         "  {\n" ..
@@ -161,12 +173,13 @@ function auditor.build_payload(filepath, source_code)
         '    "line": <line_number_or_null>,\n' ..
         '    "severity": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",\n' ..
         '    "vuln_type": "<standard_category_name>",\n' ..
-        '    "description": "<concise explanation>",\n' ..
-        '    "exploit_scenario": "<concrete execution path>",\n' ..
-        '    "remediation": "<recommended safe code pattern>"\n' ..
+        '    "description": "<concise, grounded explanation of the verified vulnerability>",\n' ..
+        '    "exploit_scenario": "<step-by-step mechanism showing how untrusted input reaches the sink and triggers unauthorized execution>",\n' ..
+        '    "remediation": "<exact, safe Lua code replacement>"\n' ..
         "  }\n" ..
-        "]\n" ..
-        "If no verifiable vulnerabilities are found, return exactly: []"
+        "]\n\n" ..
+        "If no verifiable, real-world vulnerabilities exist, you MUST return exactly:\n" ..
+        "[]"
 
     local user_prompt = string.format("Target File: %s\n\nSource Code:\n```lua\n%s\n```", filepath, source_code)
 

@@ -12,6 +12,7 @@ Cosine performs automated security analysis on Lua source files to discover vuln
 - **Zero External Dependencies**: Pure Lua standard library (`io`, `os`, `string`, `table`) with `curl`. Runs seamlessly on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
 - **High-Demand Resilience**: Automatic retry with exponential backoff and seamless fallback cascading (`gemini-3.8-flash` → `gemini-3-flash-preview` → `gemini-3.1-flash-lite`).
 - **Rich ANSI Terminal Reports**: Categorized severity badges (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), precise code locations, descriptions, exploit scenarios, and recommended remediations.
+- **Zero False Positives Mandate**: Strict anti-hallucination rules and realistic threat modeling. Distinguishes benign local CLI idioms from genuine attack vectors. See [docs/AUDITING_RULES.md](docs/AUDITING_RULES.md).
 - **Automated JSON Export**: Saves machine-readable findings to `results.json` for CI/CD integration.
 - **Project-Wide Scanning**: Recursively scans and aggregates findings across entire projects with `cosine check_project`.
 
