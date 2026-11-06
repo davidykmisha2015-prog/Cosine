@@ -8,11 +8,12 @@ Cosine performs automated security analysis on Lua source files to discover vuln
 
 ## ✨ Features
 
+- **Multi-Provider AI Architecture**: Native support for **Google Gemini**, **Anthropic Claude**, **Alibaba Qwen**, **OpenAI**, **OpenRouter**, **DeepSeek**, and **Local LLMs** (Ollama, vLLM) without external SDKs.
 - **Lua-Specific Auditing**: Detects issues considering metatables, `_G` environment pollution, C-API boundaries, and dynamic module loading.
 - **Zero External Dependencies**: Pure Lua standard library (`io`, `os`, `string`, `table`) with `curl`. Runs seamlessly on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
-- **High-Demand Resilience**: Automatic retry with exponential backoff and seamless fallback cascading (`gemini-3.8-flash` → `gemini-3-flash-preview` → `gemini-3.1-flash-lite`).
-- **Rich ANSI Terminal Reports**: Categorized severity badges (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), precise code locations, descriptions, exploit scenarios, and recommended remediations.
+- **High-Demand Resilience**: Automatic retry with exponential backoff and seamless fallback cascading across models.
 - **Zero False Positives Mandate**: Strict anti-hallucination rules and realistic threat modeling. Distinguishes benign local CLI idioms from genuine attack vectors. See [docs/AUDITING_RULES.md](docs/AUDITING_RULES.md).
+- **Rich ANSI Terminal Reports**: Categorized severity badges (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), precise code locations, descriptions, exploit scenarios, and recommended remediations.
 - **Automated JSON Export**: Saves machine-readable findings to `results.json` for CI/CD integration.
 - **Project-Wide Scanning**: Recursively scans and aggregates findings across entire projects with `cosine check_project`.
 
@@ -51,17 +52,37 @@ You can execute directly from the cloned repository:
 
 ---
 
-## 🔑 Setup
+## 🔑 Setup & Supported Providers
 
-Cosine uses the Gemini API for static vulnerability inference. Set your API key:
+Cosine automatically detects your provider based on your environment variables, or you can specify it via `-p, --provider`.
+
+| Provider | Environment Variable | Default Model | Manual Flag |
+|---|---|---|---|
+| **Google Gemini** | `GEMINI_API_KEY` | `gemini-3.8-flash` | `-p gemini` |
+| **Anthropic Claude** | `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | `claude-3-5-haiku-20241022` | `-p claude` |
+| **Alibaba Qwen** | `QWEN_API_KEY` / `DASHSCOPE_API_KEY` | `qwen-plus` | `-p qwen` |
+| **OpenAI** | `OPENAI_API_KEY` | `gpt-4o-mini` | `-p openai` |
+| **OpenRouter** | `OPENROUTER_API_KEY` | `qwen/qwen-2.5-coder-32b-instruct` | `-p openrouter` |
+| **DeepSeek** | `DEEPSEEK_API_KEY` | `deepseek-chat` | `-p deepseek` |
+| **Local / Custom** | `COSINE_API_KEY` / `OPENAI_BASE_URL` | `default` | `-p custom --base-url <url>` |
+
+### Quick Start by Provider
 
 ```bash
-export GEMINI_API_KEY="your-gemini-api-key"
-```
+# Using Alibaba Qwen
+export QWEN_API_KEY="sk-..."
+cosine script.lua
 
-Optional: override default model:
-```bash
-export GEMINI_MODEL="gemini-3.8-flash"
+# Using Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-..."
+cosine script.lua
+
+# Using Google Gemini
+export GEMINI_API_KEY="AIza..."
+cosine script.lua
+
+# Using Local Ollama / vLLM
+cosine --provider custom --base-url http://localhost:11434/v1/chat/completions script.lua
 ```
 
 ---
@@ -88,8 +109,11 @@ cosine check_project /path/to/project
 
 | Flag | Description |
 |---|---|
+| `-p, --provider <name>` | Select provider: `gemini`, `claude`, `qwen`, `openai`, `openrouter`, `deepseek`, `custom` |
+| `-k, --api-key <key>` | Pass API key directly via CLI (overrides environment variable) |
+| `-m, --model <name>` | Custom model ID for selected provider |
+| `--base-url <url>` | Custom base URL for OpenAI-compatible endpoints (Ollama, vLLM, etc.) |
 | `-o, --output <file>` | Custom JSON report file path (default: `results.json`) |
-| `-m, --model <name>` | Custom Gemini model ID (default: `gemini-3.8-flash`) |
 | `--no-color` | Disable ANSI terminal colors |
 | `-s, --silent` | Suppress progress logs and display only findings |
 | `-v, --version` | Display version information |

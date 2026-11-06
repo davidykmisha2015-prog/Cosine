@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 -- ==============================================================================
 -- Application: Cosine CLI
--- Description: Static Application Security Testing (SAST) for Lua Codebases
+-- Description: Multi-Provider SAST for Lua Codebases
 -- ==============================================================================
 
 local script_dir = debug.getinfo(1, "S").source:match("^@?(.*/)") or "./"
@@ -10,30 +10,42 @@ package.path = script_dir .. "?.lua;" .. script_dir .. "?/init.lua;" .. package.
 local auditor  = require("auditor")
 local reporter = require("reporter")
 
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 
 --- Display usage banner and CLI options.
 local function print_help()
     io.stdout:write([[
-Cosine - Static Application Security Testing (SAST) Engine for Lua
+Cosine - Multi-Provider Static Application Security Testing (SAST) Engine for Lua
 
 Usage:
   cosine <path/to/file.lua>            Audit a single Lua source file
   cosine check <path/to/file.lua>      Audit a single Lua source file
   cosine check_project [directory]     Recursively find & audit all Lua files in project
 
-Options:
+Provider & Model Options:
+  -p, --provider <name>  LLM Provider (default: auto-detected from environment)
+                         Supported: gemini | claude | qwen | openai | openrouter | deepseek | custom
+  -k, --api-key <key>    Specify API key directly (overrides environment variables)
+  -m, --model <name>     Specify model ID (defaults to provider's recommended model)
+  --base-url <url>       Specify custom API base URL (for Ollama, vLLM, or custom proxies)
+
+Output & Formatting Options:
   -o, --output <path>    Specify output JSON destination (default: results.json)
-  -m, --model <name>     Specify preferred Gemini model (default: gemini-3.8-flash)
   --no-color             Disable ANSI terminal colors
   -s, --silent           Suppress progress logging and show only findings
   -v, --version          Show version information
   -h, --help             Display this help message
 
-Environment Variables:
-  GEMINI_API_KEY         (Required) Google Gemini API key
-  GEMINI_MODEL           (Optional) Override default Gemini model ID
-  NO_COLOR               (Optional) Set to disable terminal colors
+Supported Environment Variables:
+  GEMINI_API_KEY         Google Gemini API Key
+  ANTHROPIC_API_KEY      Anthropic Claude API Key (or CLAUDE_API_KEY)
+  QWEN_API_KEY           Alibaba Qwen / DashScope API Key (or DASHSCOPE_API_KEY)
+  OPENAI_API_KEY         OpenAI API Key
+  OPENROUTER_API_KEY     OpenRouter API Key
+  DEEPSEEK_API_KEY       DeepSeek API Key
+  COSINE_API_KEY         Universal fallback API Key
+  OPENAI_BASE_URL        Base URL for custom/local endpoints
+  NO_COLOR               Disable ANSI terminal colors
 ]])
 end
 
@@ -43,7 +55,6 @@ end
 local function find_lua_files(dir)
     dir = dir or "."
     local files = {}
-    -- Use find command portably on Unix/Linux systems
     local cmd = string.format("find %s -type f -name '*.lua' -not -path '*/.*' 2>/dev/null", auditor.sh_quote(dir))
     local p = io.popen(cmd)
     if p then
@@ -62,8 +73,11 @@ local function parse_args(args)
     local opts = {
         command   = nil,
         targets   = {},
+        provider  = nil,
+        api_key   = nil,
+        model     = nil,
+        base_url  = nil,
         output    = auditor.DEFAULT_OUTPUT,
-        model     = os.getenv("GEMINI_MODEL") or auditor.DEFAULT_MODEL,
         color     = true,
         silent    = false,
     }
@@ -88,9 +102,18 @@ local function parse_args(args)
         elseif a == "-o" or a == "--output" then
             i = i + 1
             opts.output = args[i] or auditor.DEFAULT_OUTPUT
+        elseif a == "-p" or a == "--provider" then
+            i = i + 1
+            opts.provider = args[i]
+        elseif a == "-k" or a == "--api-key" then
+            i = i + 1
+            opts.api_key = args[i]
         elseif a == "-m" or a == "--model" then
             i = i + 1
-            opts.model = args[i] or opts.model
+            opts.model = args[i]
+        elseif a == "--base-url" then
+            i = i + 1
+            opts.base_url = args[i]
         elseif a == "check" then
             opts.command = "check"
         elseif a == "check_project" then
@@ -125,18 +148,33 @@ local function main()
         os.exit(0)
     end
 
-    -- Verify API Key
-    local api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key:match("^%s*$") then
-        io.stderr:write("[!] Error: GEMINI_API_KEY environment variable is not set.\n")
-        io.stderr:write("    Run: export GEMINI_API_KEY=\"your_key_here\"\n")
+    -- Determine provider
+    local provider_id = auditor.detect_provider(opts)
+    local prov = auditor.PROVIDERS[provider_id]
+    if not prov then
+        io.stderr:write(string.format("[!] Error: Unknown provider '%s'.\n", tostring(opts.provider)))
+        io.stderr:write("    Supported: gemini, claude, qwen, openai, openrouter, deepseek, custom\n")
         os.exit(1)
     end
+
+    -- Resolve API Key
+    local api_key = auditor.resolve_api_key(provider_id, opts.api_key)
+    if provider_id ~= "custom" and (not api_key or api_key:match("^%s*$")) then
+        local env_hint = table.concat(prov.env_keys, " or ")
+        io.stderr:write(string.format("[!] Error: No API key found for %s.\n", prov.name))
+        io.stderr:write(string.format("    Set environment variable: export %s=\"your_key\"\n", env_hint))
+        io.stderr:write("    Or pass via command-line: --api-key <key>\n")
+        os.exit(1)
+    end
+    api_key = api_key or ""
+
+    local active_model = opts.model or prov.default_model
 
     -- Handle check_project command
     if opts.command == "check_project" or (opts.targets[1] and opts.targets[1]:match("/$")) then
         local target_dir = opts.targets[1] or "."
         if not opts.silent then
+            print(string.format("[+] Provider: %s (model: %s)", prov.name, active_model))
             print(string.format("[+] Scanning directory '%s' for Lua files...", target_dir))
         end
 
@@ -162,9 +200,9 @@ local function main()
 
             local source_code, read_err = auditor.read_target_file(file_path)
             if source_code then
-                local payload = auditor.build_payload(file_path, source_code)
-                local findings_json, used_model, audit_err = auditor.execute_audit(
-                    api_key, opts.model, payload, { verbose = not opts.silent }
+                local findings_json, used_model, used_prov, audit_err = auditor.execute_audit(
+                    provider_id, api_key, opts.model, file_path, source_code,
+                    { verbose = not opts.silent, base_url = opts.base_url }
                 )
                 if findings_json then
                     local ok, parsed = pcall(reporter.parse_json, findings_json)
@@ -184,7 +222,6 @@ local function main()
         -- Serialize aggregated findings
         local aggregated_json = "[]"
         if #all_findings > 0 then
-            -- Use reporter to format or write
             local ok_format, json_dump = pcall(function()
                 local parts = { "[\n" }
                 for i, item in ipairs(all_findings) do
@@ -229,7 +266,7 @@ local function main()
         os.exit(0)
     end
 
-    -- Default: Single target file check
+    -- Single target file check
     local target_path = opts.targets[1]
     if not target_path or target_path == "" then
         print_help()
@@ -237,6 +274,7 @@ local function main()
     end
 
     if not opts.silent then
+        print(string.format("[+] Provider: %s (model: %s)", prov.name, active_model))
         print(string.format("[+] Reading target file: %s", target_path))
     end
 
@@ -251,9 +289,9 @@ local function main()
         print("[+] Building security audit payload...")
     end
 
-    local payload = auditor.build_payload(target_path, source_code)
-    local findings_json, used_model, audit_err = auditor.execute_audit(
-        api_key, opts.model, payload, { verbose = not opts.silent }
+    local findings_json, used_model, used_prov, audit_err = auditor.execute_audit(
+        provider_id, api_key, opts.model, target_path, source_code,
+        { verbose = not opts.silent, base_url = opts.base_url }
     )
 
     if not findings_json then
@@ -262,7 +300,7 @@ local function main()
     end
 
     if not opts.silent then
-        print(string.format("[+] Audit completed successfully using %s.", used_model))
+        print(string.format("[+] Audit completed successfully via %s (%s).", used_prov, used_model))
     end
 
     local save_ok, save_err = auditor.save_results(opts.output, findings_json)
