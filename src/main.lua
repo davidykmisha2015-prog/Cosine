@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 -- ==============================================================================
 -- Application: Cosine CLI
--- Description: Multi-Provider SAST for Lua Codebases
+-- Description: Multi-Language (Lua & Python) & Multi-Provider SAST Engine
 -- ==============================================================================
 
 local script_dir = debug.getinfo(1, "S").source:match("^@?(.*/)") or "./"
@@ -10,20 +10,21 @@ package.path = script_dir .. "?.lua;" .. script_dir .. "?/init.lua;" .. package.
 local auditor  = require("auditor")
 local reporter = require("reporter")
 
-local VERSION = "0.2.0"
+local VERSION = "0.3.0"
 
 --- Display usage banner and CLI options.
 local function print_help()
     io.stdout:write([[
-Cosine - Multi-Provider Static Application Security Testing (SAST) Engine for Lua
+Cosine - Static Application Security Testing (SAST) Engine for Lua & Python
 
 Usage:
-  cosine <path/to/file.lua>            Audit a single Lua source file
-  cosine check <path/to/file.lua>      Audit a single Lua source file
-  cosine check_project [directory]     Recursively find & audit all Lua files in project
+  cosine <path/to/file>                Audit a source file (.lua or .py)
+  cosine check <path/to/file>          Audit a source file (.lua or .py)
+  cosine check_project [directory]     Recursively find & audit all files in project
 
-Provider & Model Options:
-  -p, --provider <name>  LLM Provider (default: auto-detected from environment)
+Language & Model Options:
+  -l, --lang <lua|python> Select target language (auto-detected from file extension)
+  -p, --provider <name>   LLM Provider (default: auto-detected from environment)
                          Supported: gemini | claude | qwen | openai | openrouter | deepseek | custom
   -k, --api-key <key>    Specify API key directly (overrides environment variables)
   -m, --model <name>     Specify model ID (defaults to provider's recommended model)
@@ -49,13 +50,25 @@ Supported Environment Variables:
 ]])
 end
 
---- Scan directory recursively for all .lua files excluding hidden / build directories.
+--- Scan directory recursively for all .lua and .py files excluding hidden / build directories.
 -- @param dir string
+-- @param lang_filter string|nil
 -- @return table List of file paths
-local function find_lua_files(dir)
+local function find_supported_files(dir, lang_filter)
     dir = dir or "."
+    local name_filter = "\\( -name '*.lua' -o -name '*.py' \\)"
+    if lang_filter == "lua" then
+        name_filter = "-name '*.lua'"
+    elseif lang_filter == "python" then
+        name_filter = "-name '*.py'"
+    end
+
+    local cmd = string.format(
+        "find %s -type f %s -not -path '*/.*' -not -path '*/__pycache__*' 2>/dev/null",
+        auditor.sh_quote(dir),
+        name_filter
+    )
     local files = {}
-    local cmd = string.format("find %s -type f -name '*.lua' -not -path '*/.*' 2>/dev/null", auditor.sh_quote(dir))
     local p = io.popen(cmd)
     if p then
         for line in p:lines() do
@@ -76,6 +89,7 @@ local function parse_args(args)
         provider  = nil,
         api_key   = nil,
         model     = nil,
+        language  = nil,
         base_url  = nil,
         output    = auditor.DEFAULT_OUTPUT,
         color     = true,
@@ -108,6 +122,9 @@ local function parse_args(args)
         elseif a == "-k" or a == "--api-key" then
             i = i + 1
             opts.api_key = args[i]
+        elseif a == "-l" or a == "--lang" then
+            i = i + 1
+            opts.language = args[i] and args[i]:lower()
         elseif a == "-m" or a == "--model" then
             i = i + 1
             opts.model = args[i]
@@ -175,13 +192,13 @@ local function main()
         local target_dir = opts.targets[1] or "."
         if not opts.silent then
             print(string.format("[+] Provider: %s (model: %s)", prov.name, active_model))
-            print(string.format("[+] Scanning directory '%s' for Lua files...", target_dir))
+            print(string.format("[+] Scanning directory '%s' for supported source files...", target_dir))
         end
 
-        local lua_files = find_lua_files(target_dir)
-        if #lua_files == 0 then
+        local files = find_supported_files(target_dir, opts.language)
+        if #files == 0 then
             if not opts.silent then
-                print("[-] No .lua source files discovered in target path.")
+                print("[-] No supported source files (.lua, .py) discovered in target path.")
             end
             reporter.report("[]", { color = opts.color })
             auditor.save_results(opts.output, "[]")
@@ -189,20 +206,21 @@ local function main()
         end
 
         if not opts.silent then
-            print(string.format("[+] Found %d Lua source file(s) to analyze.\n", #lua_files))
+            print(string.format("[+] Found %d source file(s) to analyze.\n", #files))
         end
 
         local all_findings = {}
-        for idx, file_path in ipairs(lua_files) do
+        for idx, file_path in ipairs(files) do
+            local file_lang = auditor.detect_language(file_path)
             if not opts.silent then
-                print(string.format("[%d/%d] Auditing: %s", idx, #lua_files, file_path))
+                print(string.format("[%d/%d] Auditing (%s): %s", idx, #files, file_lang, file_path))
             end
 
             local source_code, read_err = auditor.read_target_file(file_path)
             if source_code then
                 local findings_json, used_model, used_prov, audit_err = auditor.execute_audit(
                     provider_id, api_key, opts.model, file_path, source_code,
-                    { verbose = not opts.silent, base_url = opts.base_url }
+                    { verbose = not opts.silent, base_url = opts.base_url, language = file_lang }
                 )
                 if findings_json then
                     local ok, parsed = pcall(reporter.parse_json, findings_json)
@@ -273,9 +291,11 @@ local function main()
         os.exit(1)
     end
 
+    local lang = opts.language or auditor.detect_language(target_path)
+
     if not opts.silent then
         print(string.format("[+] Provider: %s (model: %s)", prov.name, active_model))
-        print(string.format("[+] Reading target file: %s", target_path))
+        print(string.format("[+] Target: %s (language: %s)", target_path, lang))
     end
 
     local source_code, read_err = auditor.read_target_file(target_path)
@@ -291,7 +311,7 @@ local function main()
 
     local findings_json, used_model, used_prov, audit_err = auditor.execute_audit(
         provider_id, api_key, opts.model, target_path, source_code,
-        { verbose = not opts.silent, base_url = opts.base_url }
+        { verbose = not opts.silent, base_url = opts.base_url, language = lang }
     )
 
     if not findings_json then

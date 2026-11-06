@@ -41,9 +41,9 @@ function auditor.json_escape(str)
     end))
 end
 
---- Build the strict Zero-False-Positive system prompt.
+--- Build the strict Zero-False-Positive system prompt for Lua.
 -- @return string
-function auditor.get_system_prompt()
+function auditor.get_lua_system_prompt()
     return "You are the elite Static Application Security Testing (SAST) engine for Lua codebases (Lua 5.1-5.4 & LuaJIT).\n" ..
         "Your primary mandate is ZERO FALSE POSITIVES. In production and enterprise open-source, false positives erode developer trust and waste critical engineering resources. You must think critically, exercise intellectual honesty, and reject theoretical, unexploitable, or hallucinated claims.\n\n" ..
         "### CORE OPERATIONAL DIRECTIVES (ANTI-FALSE-POSITIVE PRINCIPLES):\n" ..
@@ -80,6 +80,70 @@ function auditor.get_system_prompt()
         "]\n\n" ..
         "If no verifiable, real-world vulnerabilities exist, you MUST return exactly:\n" ..
         "[]"
+end
+
+--- Build the strict Zero-False-Positive system prompt for Python.
+-- @return string
+function auditor.get_python_system_prompt()
+    return "You are the elite Static Application Security Testing (SAST) engine for Python codebases (Python 3.x).\n" ..
+        "Your primary mandate is ZERO FALSE POSITIVES. In production and enterprise open-source, false positives erode developer trust and waste critical engineering resources. You must think critically, exercise intellectual honesty, and reject theoretical, unexploitable, or hallucinated claims.\n\n" ..
+        "### CORE OPERATIONAL DIRECTIVES (ANTI-FALSE-POSITIVE PRINCIPLES):\n" ..
+        "1. CRITICAL THINKING & INTELLECTUAL HONESTY:\n" ..
+        "   - Have your own professional skepticism. Do NOT invent problems to look thorough.\n" ..
+        "   - A clean report '[]' is the BEST and most valuable result when no genuine exploit exists.\n" ..
+        "   - Functional typos, suboptimal idioms, or harmless bugs are NOT security vulnerabilities. Never flag code smells as security risks.\n\n" ..
+        "2. REALISTIC THREAT MODEL (CLI vs SERVER CONTEXT):\n" ..
+        "   - In CLI tools: The user running the script already owns their process and execution environment.\n" ..
+        "   - Self-exploitation is NOT a vulnerability: Modifying their own environment variables (e.g. $HOME, $USER) or local config files is NOT an exploit.\n" ..
+        "   - Parameterized queries ('cursor.execute(sql, (param,))') are completely safe. Do NOT flag parameterized database calls.\n" ..
+        "   - Subprocess execution with an argument list ('subprocess.run([cmd, arg], shell=False)') is safe against shell injection.\n\n" ..
+        "3. COMPLETE SOURCE-TO-SINK TRACEABILITY:\n" ..
+        "   - Every reported issue MUST prove a complete, unbroken data-flow path: [Untrusted External Source] -> [Missing/Flawed Validation] -> [Dangerous Sink].\n" ..
+        "   - Inspect surrounding validation: If input is sanitized (e.g. 'shlex.quote', 'os.path.basename', regex, allowlists), DO NOT flag it.\n\n" ..
+        "4. TARGET VULNERABILITY CRITERIA FOR PYTHON:\n" ..
+        "   - Insecure Shell/Command Execution: Direct string formatting/concatenation into 'os.system', 'os.popen', or 'subprocess.*(..., shell=True)'.\n" ..
+        "   - Insecure Deserialization & Dynamic Execution: Untrusted input to 'eval()', 'exec()', 'pickle.loads()', 'marshal.loads()', or 'yaml.load(..., Loader=yaml.Loader)'.\n" ..
+        "   - Path Traversal & File System Exposure: Unsanitized input into 'open()', 'os.remove()', or archive extraction without boundary validation (ZipSlip).\n" ..
+        "   - SQL / Template Injection: Unescaped string formatting in database queries or template engines (e.g. Jinja2 'render_template_string(user_input)').\n" ..
+        "   - Server-Side Request Forgery (SSRF): Untrusted URLs directly fetched via 'requests.get()' or 'urllib' without allowlisting.\n" ..
+        "   - Real Leaked Credentials: Hardcoded active API keys, private tokens, or production secrets.\n\n" ..
+        "### RESPONSE FORMAT:\n" ..
+        "Return strictly a raw JSON array of objects with the schema:\n" ..
+        "[\n" ..
+        "  {\n" ..
+        '    "file": "<path_to_file>",\n' ..
+        '    "line": <line_number_or_null>,\n' ..
+        '    "severity": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",\n' ..
+        '    "vuln_type": "<standard_category_name>",\n' ..
+        '    "description": "<concise, grounded explanation of the verified vulnerability>",\n' ..
+        '    "exploit_scenario": "<step-by-step mechanism showing how untrusted input reaches the sink and triggers unauthorized execution>",\n' ..
+        '    "remediation": "<exact, safe Python code replacement>"\n' ..
+        "  }\n" ..
+        "]\n\n" ..
+        "If no verifiable, real-world vulnerabilities exist, you MUST return exactly:\n" ..
+        "[]"
+end
+
+--- Detect programming language based on file extension.
+-- @param filepath string
+-- @return string "lua"|"python"
+function auditor.detect_language(filepath)
+    if not filepath then return "lua" end
+    local lower = filepath:lower()
+    if lower:match("%.pyw?$") then
+        return "python"
+    end
+    return "lua"
+end
+
+--- Get system prompt tailored to target language.
+-- @param language string|nil "lua"|"python"
+-- @return string
+function auditor.get_system_prompt(language)
+    if language == "python" then
+        return auditor.get_python_system_prompt()
+    end
+    return auditor.get_lua_system_prompt()
 end
 
 --- Provider Specifications and Builders
@@ -509,8 +573,9 @@ function auditor.execute_audit(provider_id, api_key, preferred_model, filepath, 
     local prov = auditor.PROVIDERS[provider_id] or auditor.PROVIDERS["gemini"]
     local model = preferred_model or prov.default_model
 
-    local system_prompt = auditor.get_system_prompt()
-    local user_prompt = string.format("Target File: %s\n\nSource Code:\n```lua\n%s\n```", filepath, source_code)
+    local lang = options.language or auditor.detect_language(filepath)
+    local system_prompt = auditor.get_system_prompt(lang)
+    local user_prompt = string.format("Target File: %s\nLanguage: %s\n\n```%s\n%s\n```", filepath, lang, lang, source_code)
 
     local models_to_try = { model }
     if prov.fallback_models then
